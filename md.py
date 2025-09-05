@@ -22,9 +22,9 @@ def download_video(video_url, filepath, filename):
             for chunk in video_response.iter_content(chunk_size=8192):
                 f.write(chunk)
                 bar.update(len(chunk))
-        print(f"Saved to: {filepath}\n")
+        print(f"  Saved to: {filepath}\n")
     else:
-        print(f"Failed to download: {video_url} (Status {video_response.status_code})\n")
+        print(f"  Failed to download: {video_url} (Status {video_response.status_code})\n")
 
 
 def download_subtitle(subtitle_url, filepath):
@@ -32,9 +32,9 @@ def download_subtitle(subtitle_url, filepath):
     if response.status_code == 200:
         with open(filepath, "wb") as f:
             f.write(response.content)
-        print(f"Subtitle saved to: {filepath}\n")
+        print(f"  Subtitles saved to: {filepath}\n")
     else:
-        print(f"Failed to download subtitle: {subtitle_url} (Status {response.status_code})\n")
+        print(f"  Failed to download subtitles: {subtitle_url} (Status {response.status_code})\n")
 
 
 def get_subtitle_url(video_info):
@@ -168,21 +168,27 @@ def select_topic(all_results):
 
 def determine_season_and_episode(results):
     """
-    Determines the season and episode numbers from the video titles.
+    Determines the season and episode numbers and whether this is a special version from the video titles.
     Returns a list of video_info dictionaries with season and episode added.
     """
     for video_info in results:
+        #print(f"[debug] Video title: {video_info.get("title","")}")
         match = re.search(r"S(\d+)\/E(\d+)", video_info.get("title", ""))
+        special = re.search(r" \([A-Za-z]+\)$", video_info.get("title", ""))
+
+        video_info["season"] = None
+        video_info["episode"] = None
+        video_info["special"] = None
         if match:
             video_info["season"] = match.group(1)
             video_info["episode"] = match.group(2)
-        else:
-            video_info["season"] = None
-            video_info["episode"] = None
+        if special:
+            # Removing space and parathesis and converting to lowercase
+            video_info["special"] = special.group(0)[2:-1].lower()
     return results
 
 
-def valueOrElse(value, default):
+def intValueOrElse(value, default):
     if value is None:
         return default
         
@@ -191,13 +197,22 @@ def valueOrElse(value, default):
     except (ValueError, TypeError):
         return default
 
+def strValueOrElse(value, default):
+    if value is None:
+        return default
 
-def sort_seasons_by_season_and_episode(seasons):
+    try:
+        return str(value)
+    except (ValueError, TypeError):
+        return default
+
+
+def sort_seasons_by_season_and_special_and_episode(seasons):
     """
     Sorts the seasons by season and episode number.
     Returns a sorted list of seasons.
     """
-    return sorted(seasons, key=lambda x: (valueOrElse(x["season"], 0), valueOrElse(x["episode"], 0)))
+    return sorted(seasons, key=lambda x: (intValueOrElse(x["season"], 0), strValueOrElse(x["special"], ""), intValueOrElse(x["episode"], 0)))
 
 
 def select_season(results):
@@ -206,13 +221,15 @@ def select_season(results):
     Returns the list of episodes for the selected season.
     """
     results = determine_season_and_episode(results)
-    results = sort_seasons_by_season_and_episode(results)
+    results = sort_seasons_by_season_and_special_and_episode(results)
 
     seasons = {}
     for video_info in results:
-        if video_info["season"] not in seasons:
-            seasons[video_info["season"]] = []
-        seasons[video_info["season"]].append(video_info)
+        season_key = f"{video_info["season"]} {strValueOrElse(video_info["special"], "")}"
+
+        if season_key not in seasons:
+            seasons[season_key] = []
+        seasons[season_key].append(video_info)
 
     if len(seasons) == 0:
         print("No seasons found.")
@@ -229,8 +246,8 @@ def select_season(results):
             return [video for season in seasons.values() for video in season]
 
         try:
-            if 1 <= int(choice) <= len(seasons):
-                selected_season = sorted(seasons.keys(), key=lambda s: (valueOrElse(s, 0)))[int(choice) - 1]
+            if 1 <= intValueOrElse(choice, 0) <= len(seasons):
+                selected_season = list(seasons.keys())[int(choice) - 1]
                 print(f"\nSelected Season {selected_season} with {len(seasons[selected_season])} episodes.\n")
                 return seasons[selected_season]
             else:
@@ -254,19 +271,19 @@ def update_video_type(results):
     return results
 
 
-def download_all_videos(all_results, download_folder, title, quality="medium", download_subtitles=False):
+def download_all_videos(all_results, download_folder, title, quality="medium", download_subtitles=False, output_strategy="extend"):
     """Download all videos (and optionally subtitles) from the filtered results."""
     os.makedirs(download_folder, exist_ok=True)
     for i, video_info in enumerate(all_results, start=1):
-        video_url, file_extension = get_video_url_by_quality(video_info, quality)
-        filename_base = f"{title}"
-        if video_info["video-type"] == VIDEO_TYPE_EPISODE:
-            episode_code = f"S{int(video_info['season']):02d}E{int(video_info['episode']):02d}"
-            filename_base += f" {episode_code}"
-        filename_video = f"{filename_base}{file_extension}"
-        filepath_video = os.path.join(download_folder, filename_video)
+        print(f"[{i}/{len(all_results)}] Downloading: {compile_filename_base(title, video_info)} (quality: {quality})")
 
-        print(f"[{i}/{len(all_results)}] Downloading: {filename_video} (quality: {quality})")
+        video_url, video_extension = get_video_url_by_quality(video_info, quality)
+        print(f"  URL: {video_url}")
+
+        filename_base, filename_video, filepath_video = handle_file_existance(download_folder, video_extension, title, video_info, output_strategy)
+        if filename_base is None:
+            continue
+        print(f"  Output file: {filename_video}")
 
         download_video(video_url, filepath_video, filename_video)
 
@@ -275,7 +292,46 @@ def download_all_videos(all_results, download_folder, title, quality="medium", d
             if subtitle_url:
                 download_subtitle(subtitle_url, os.path.join(download_folder, f"{filename_base}{subtitle_extension}"))
             else:
-                print(f"No subtitle available for {filename_video}.\n")
+                print(f"  No subtitles available for {filename_video}.\n")
+
+
+def compile_filename_base(title, video_info, suffix=None):
+    filename_base = f"{title}"
+    if video_info["video-type"] == VIDEO_TYPE_EPISODE:
+        episode_code = f"S{int(video_info['season']):02d}E{int(video_info['episode']):02d}"
+        filename_base += f" {episode_code}"
+    if video_info["special"]:
+        filename_base += f".{video_info["special"]}"
+    if suffix:
+        filename_base += f".{suffix}"
+    return filename_base
+
+
+def handle_file_existance(download_folder, video_extension, title, video_info, output_strategy):
+    """
+    Checks whether the desired output file exsits already. Depending on the output strategy extends the filename
+    by a suffix, keeps it or returns a None tuple.
+    Returns a tuple of filename_base, filename_video and filepath_video
+    """
+    filename_base = compile_filename_base(title, video_info)
+    filename_video = f"{filename_base}{video_extension}"
+    filepath_video = os.path.join(download_folder, filename_video)
+
+    if output_strategy == "overwrite":
+        print(f"  Output file {filepath_video} exists already.\n  Overwriting..")
+        return filename_base, filename_video, filepath_video
+
+    suffix = 0
+    while os.path.isfile(filepath_video):
+        if output_strategy == "skip":
+            print(f"  Output file {filepath_video} exists already.\n  Skipping..")
+            return None, None, None
+        suffix += 1
+        filename_base = compile_filename_base(title, video_info, suffix)
+        filename_video = f"{filename_base}{video_extension}"
+        filepath_video = os.path.join(download_folder, filename_video)
+
+    return filename_base, filename_video, filepath_video
 
 
 def is_topic_is_series(results):
@@ -286,7 +342,7 @@ def is_topic_is_series(results):
     return any(re.search(r"S[0-9]+\/E[0-9]+", v.get("title", "")) for v in results)
 
 
-def search_and_download_all(query, download_folder, quality="medium", download_subtitles=False, use_title_field=False, use_topic_field=False, include_future_content=False):
+def search_and_download_all(query, download_folder, quality="medium", download_subtitles=False, use_title_field=False, use_topic_field=False, include_future_content=False, output_strategy="extend"):
     all_results = query_api(query, use_title_field, use_topic_field, include_future_content)
     if not all_results:
         print("No results found for the given query.")
@@ -302,7 +358,7 @@ def search_and_download_all(query, download_folder, quality="medium", download_s
         print("This is a series. Do you want to download a specific or all episodes?")
         filtered_results = select_season(filtered_results)
         if len(filtered_results) > 0:
-            download_all_videos(filtered_results, download_folder, topic, quality, download_subtitles)
+            download_all_videos(filtered_results, download_folder, topic, quality, download_subtitles, output_strategy)
         else:
             print("No seasons detected in the results.")
             exit(1)
@@ -341,6 +397,12 @@ if __name__ == "__main__":
         action="store_true",
         help="Search including future content (default: false)"
     )
+    parser.add_argument(
+        "-o", "--output",
+        choices=["extend", "overwrite", "skip"],
+        default="extend",
+        help="Output strategy: If the output exists, should it be overwritten, extended or skipped?"
+    )
     args = parser.parse_args()
 
-    search_and_download_all(args.query, args.folder, args.quality, args.subtitles, args.title, args.topic, args.future)
+    search_and_download_all(args.query, args.folder, args.quality, args.subtitles, args.title, args.topic, args.future, args.output)
