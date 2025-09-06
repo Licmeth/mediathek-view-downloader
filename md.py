@@ -2,6 +2,7 @@ import requests
 import os
 import re
 import argparse
+from ebutt2srt import convert_ebutt_to_srt
 from tqdm import tqdm
 
 VIDEO_TYPE_EPISODE = "episode"
@@ -45,7 +46,7 @@ def get_subtitle_url(video_info):
     """
     subtitle_url = video_info.get("url_subtitle")
 
-    # Determine file extension from URL (default to .mp4 if not found)
+    # Determine file extension from URL (default to .srt if not found)
     file_extension = ".srt"
     if subtitle_url:
         match = re.search(r"\.([a-zA-Z0-9]+)(?:$)", subtitle_url)
@@ -290,9 +291,30 @@ def download_all_videos(all_results, download_folder, title, quality="medium", d
         if download_subtitles:
             subtitle_url, subtitle_extension = get_subtitle_url(video_info)
             if subtitle_url:
-                download_subtitle(subtitle_url, os.path.join(download_folder, f"{filename_base}{subtitle_extension}"))
+                subtitle_filepath = os.path.join(download_folder, f"{filename_base}{subtitle_extension}")
+                download_subtitle(subtitle_url, subtitle_filepath)
+
+                if is_edu_tt_subtitles(subtitle_filepath):
+                    convert_subtitles(subtitle_filepath)
             else:
                 print(f"  No subtitles available for {filename_video}.\n")
+
+
+def is_edu_tt_subtitles(filepath: str) -> bool:
+    with open(filepath, "r", encoding="utf-8") as f:
+        for i, line in enumerate(f):
+            if i >= 20:
+                return False
+            if "<ebuttm:documentMetadata>" in line:
+                return True
+
+
+def convert_subtitles(filepath):
+    if os.path.splitext(filepath)[1] != ".xml":
+        new_filepath = os.path.splitext(filepath)[0] + ".xml"
+        os.rename(filepath, new_filepath)
+        filepath = new_filepath
+    convert_ebutt_to_srt(filepath)
 
 
 def compile_filename_base(title, video_info, suffix=None):
