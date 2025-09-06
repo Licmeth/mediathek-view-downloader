@@ -1,5 +1,6 @@
 import sys
 import re
+import subprocess
 import argparse
 from pathlib import Path
 
@@ -21,7 +22,7 @@ def validate_arguments(pattern, folder):
         sys.exit(1)
 
 
-def determine_groups(regex, folder)
+def determine_groups(regex, folder):
     output = {}
     elements = sorted(Path(folder).iterdir(), key=lambda p: p.name.lower())
     for element in elements:
@@ -39,11 +40,11 @@ def determine_groups(regex, folder)
 
             entry = {}
             entry["filename"] = filename
-            entry["filepath"] = element.path
+            entry["filepath"] = element.absolute()
             entry["language"] = "deu"
-            entry["take-video"] = extension in ["mkv","mp4"]
-            entry["take-audio"] = extension in ["mkv","mp4"]
-            entry["take-subtitles"] = extension in ["srt"]
+            entry["take-video"] = extension in [".mkv",".mp4"]
+            entry["take-audio"] = extension in [".mkv",".mp4"]
+            entry["take-subtitles"] = extension in [".srt", ".stl", ".xml"]
 
             output[key].append(entry)
 
@@ -58,11 +59,76 @@ def search_and_merge_all(pattern, folder):
 
     output_keys = list(output.keys())
     if output is None or len(output_keys) < 1:
-        print("ERROR: Could not determine groups of files with pattern {pattern} in folder {folder}.")
+        print(f"ERROR: Could not determine groups of files with pattern {pattern} in folder {folder}.")
         sys.exit(1)
 
-    for idx, element in enumerate(output[output_keys[0]], 1):
-        print(f"[{idx}/{len(len(output[output_keys[0]]))}] {element["filename"]} - Specify which information should be taken.")
+    set_language_and_layers(output)
+
+    for group in output:
+        output_filepath = Path(folder).joinpath(f"{group}.mkv").absolute()
+        command = f"mkvmerge -o \"{output_filepath}\""
+
+        for element in output[group]:
+            command += getSingleFileParameters(element)
+
+        print(subprocess.check_output(command, shell=True))
+
+
+def getSingleFileParameters(element: dict) -> str:
+    result = " "
+    if "language" in element:
+        result += f"--language -1:{element["language"]} "
+    if "take-video" not in element or element["take-video"] == False:
+        result += "--no-video "
+    if "take-audio" not in element or element["take-audio"] == False:
+        result += "--no-audio "
+    if "take-subtitles" not in element or element["take-subtitles"] == False:
+        result += "--no-subtitles "
+    result += f"\"{element["filepath"]}\""
+    return result
+
+
+def strLowerOrElse(value: str, default: str) -> str:
+    if value is None or value == "":
+        return default.lower()
+    return value.lower()
+
+
+def boolValueOrElse(value: str, default: bool) -> bool:
+    if value is None or value == "":
+        return default
+    return toBoolean(value)
+
+
+def toBoolean(value: str) -> bool:
+    return value is not None and value.lower() in ["true", "yes", "y", "1"]
+
+
+def set_language_and_layers(output: dict):
+    output_keys = list(output.keys())
+    key_0 = output_keys[0]
+
+    # Ask user for settings for first group
+    for i, element in enumerate(output[key_0], 1):
+        print(f"[{i}/{len(output[key_0])}] Specify which information should be taken: {element["filename"]}")
+        element["language"] = strLowerOrElse(input(f"Which langage has the content? (default: {element["language"]}) :"), element["language"])
+        element["take-video"] = boolValueOrElse(input(f"Should the video be taken? (default: {element["take-video"]}) :"), element["take-video"])
+        element["take-audio"] = boolValueOrElse(input(f"Should the audio be taken? (default: {element["take-audio"]}) :"), element["take-audio"])
+        element["take-subtitles"] = boolValueOrElse(input(f"Should the subtitles be taken? (default: {element["take-subtitles"]}) :"), element["take-subtitles"])
+
+    # Copy seetings of first group to all other groups
+    for key in output_keys[1:]:
+        if len(output[key]) < len(output[key_0]):
+            print(f"WARNING: Group {key} has less files then reference group {key_0}.")
+        if len(output[key]) > len(output[key_0]):
+            print(f"ERROR: Group {key} has more files then reference group {key_0}. Aborting..")
+            sys.exit(1)
+
+        for i, element in enumerate(output[key], 0):
+            element["language"] = output[key_0][i]["language"]
+            element["take-video"] = output[key_0][i]["take-video"]
+            element["take-audio"] = output[key_0][i]["take-audio"]
+            element["take-subtitles"] = output[key_0][i]["take-subtitles"]
 
 
 if __name__ == "__main__":
