@@ -220,6 +220,7 @@ def select_season(results):
     """
     Allows the user to select a season from the available seasons.
     Returns the list of episodes for the selected season.
+    Supports multiple selections by using '+' (e.g., '1+3+5' to select seasons 1, 3, and 5).
     """
     results = determine_season_and_episode(results)
     results = sort_seasons_by_season_and_special_and_episode(results)
@@ -235,28 +236,56 @@ def select_season(results):
     if len(seasons) == 0:
         print("No seasons found.")
         return []
-    
-    print("Available seasons:")
-    for idx, season in enumerate(seasons, 1):
-        print(f"{idx}: Season {season} ({len(seasons[season])} episodes)")
 
     while True:
-        choice = input("Select the season number to download. Leave empty or 'y' to download all: ")
-        if not choice or isinstance(choice, str) and choice.lower() == "y":
+        print("Available seasons:")
+        for idx, season in enumerate(seasons, 1):
+            print(f"{idx}: Season {season} ({len(seasons[season])} episodes)")
+
+        choice = input("Select the season number(s) to download (e.g., '1' or '1+3+5'). Leave empty or 'y' to download all: ")
+        if not choice or (isinstance(choice, str) and choice.lower() == "y"):
             print("Downloading all seasons.")
             return [video for season in seasons.values() for video in season]
 
-        try:
-            if 1 <= intValueOrElse(choice, 0) <= len(seasons):
-                selected_season = list(seasons.keys())[int(choice) - 1]
-                print(f"\nSelected Season {selected_season} with {len(seasons[selected_season])} episodes.\n")
-                return seasons[selected_season]
-            else:
-                print(f"Invalid selection: {choice}. Please select a valid season number.")
-                exit(1)
-        except ValueError:
-            print("Please enter a valid number.")
-            exit(1)
+        # Check if multiple seasons are selected with '+'
+        if '+' in choice:
+            try:
+                selected_indices = [int(x.strip()) for x in choice.split('+')]
+                season_keys = list(seasons.keys())
+                
+                # Validate all indices
+                invalid_indices = [idx for idx in selected_indices if idx < 1 or idx > len(seasons)]
+                if invalid_indices:
+                    print(f"Invalid selection(s): {', '.join(map(str, invalid_indices))}. Please select valid season numbers.")
+                    continue
+                
+                # Collect all episodes from selected seasons
+                selected_episodes = []
+                selected_season_names = []
+                for idx in selected_indices:
+                    season_key = season_keys[idx - 1]
+                    selected_episodes.extend(seasons[season_key])
+                    selected_season_names.append(season_key)
+                
+                print(f"\nSelected seasons: {', '.join(selected_season_names)} with {len(selected_episodes)} total episodes.\n")
+                return selected_episodes
+                
+            except ValueError:
+                print("Please enter valid numbers separated by '+'.")
+                continue
+        else:
+            # Single season selection
+            try:
+                if 1 <= intValueOrElse(choice, 0) <= len(seasons):
+                    selected_season = list(seasons.keys())[int(choice) - 1]
+                    print(f"\nSelected season {selected_season} with {len(seasons[selected_season])} episodes.\n")
+                    return seasons[selected_season]
+                else:
+                    print(f"Invalid selection: {choice}. Please select a valid season number.")
+                    continue
+            except ValueError:
+                print("Please enter a valid number.")
+                continue
 
 
 def update_video_type(results):
