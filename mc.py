@@ -2,7 +2,22 @@ import sys
 import re
 import subprocess
 import argparse
+import platform
+import shutil
 from pathlib import Path
+
+
+def is_mkvtoolnix_installed() -> bool:
+    # Check if system is Linux. If not, print warning and continue
+    if platform.system() != "Linux":
+        print(f"WARNING: Cannot determine whether MkvToolNix is installed.")
+        return True
+    
+    # Check if mkvmerge (MKVToolNix) is installed
+    if shutil.which("mkvmerge") is None:
+        return False
+    
+    return True
 
 
 def validate_arguments(pattern, folder):
@@ -52,6 +67,10 @@ def determine_groups(regex, folder):
 
 
 def search_and_merge_all(pattern, folder):
+    if not is_mkvtoolnix_installed():
+        print("ERROR: MKVToolNix (mkvmerge) is not installed or not in PATH.")
+        sys.exit(1)
+
     validate_arguments(pattern, folder)
     regex = re.compile(rf"^{pattern}")
 
