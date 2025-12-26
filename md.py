@@ -216,6 +216,32 @@ def sort_seasons_by_season_and_special_and_episode(seasons):
     return sorted(seasons, key=lambda x: (intValueOrElse(x["season"], 0), strValueOrElse(x["special"], ""), intValueOrElse(x["episode"], 0)))
 
 
+def select_movie(results):
+    """
+    Allows the user to select a movie from the available movies.
+    Returns the selected movie as a list with a single element.
+    """
+    while True:
+        print("Available movies:")
+        for idx, movie in enumerate(results, 1):
+            print(f"{idx}: {movie.get('title', 'Unknown Title')}")
+
+        choice = input("Select the movie number to download: ")
+        if not choice:
+            return []
+
+        try:
+            if 1 <= intValueOrElse(choice, 0) <= len(results):
+                selected_movie = results[int(choice) - 1]
+                print(f"\nSelected movie: {selected_movie.get('title', 'Unknown Title')}\n")
+                return [selected_movie]
+            else:
+                print(f"Invalid selection: {choice}. Please select a valid movie number.")
+        except ValueError:
+            print("Please enter a valid number.")
+    
+
+
 def select_season(results):
     """
     Allows the user to select a season from the available seasons.
@@ -288,7 +314,7 @@ def select_season(results):
                 continue
 
 
-def update_video_type(results):
+def update_video_type(results: list) -> list:
     """
     Updates the video type in the results to 'series' if it contains episodes.
     Returns the updated results.
@@ -351,8 +377,11 @@ def compile_filename_base(title, video_info, suffix=None):
     if video_info["video-type"] == VIDEO_TYPE_EPISODE:
         episode_code = f"S{int(video_info['season']):02d}E{int(video_info['episode']):02d}"
         filename_base += f" {episode_code}"
-    if video_info["special"]:
-        filename_base += f".{video_info["special"]}"
+    if video_info["video-type"] == VIDEO_TYPE_MOVIE:
+        if video_info["year"]:
+            filename_base += f" ({video_info['year']})"
+    if "special" in video_info and video_info["special"]:
+        filename_base += f".{video_info['special']}"
     if suffix:
         filename_base += f".{suffix}"
     return filename_base
@@ -388,9 +417,19 @@ def handle_file_existance(download_folder, video_extension, title, video_info, o
 def is_topic_is_series(results):
     """
     Determines if the filtered results represent a series (multiple episodes).
-    Returns True if the title contains episode codes.
+    Returns True if the results contain any episode.
     """
-    return any(re.search(r"S[0-9]+\/E[0-9]+", v.get("title", "")) for v in results)
+    return any(v["video-type"] == VIDEO_TYPE_EPISODE for v in results)
+
+
+def try_parse_year(results: list) -> list:
+    for video in results:
+        video["year"] = None
+        if "description" in video and video["description"]:
+            match = re.search(r"\b(19|20)\d{2}\b", video["description"])
+            if match:
+                video["year"] = match.group(0)
+    return results
 
 
 def search_and_download_all(query, download_folder, quality="medium", download_subtitles=False, use_title_field=False, use_topic_field=False, include_future_content=False, output_strategy="extend"):
@@ -404,18 +443,20 @@ def search_and_download_all(query, download_folder, quality="medium", download_s
         print(f"No videos found for topic {topic}.")
         exit(1)
 
+    filtered_results = update_video_type(filtered_results)
+    filtered_results = try_parse_year(filtered_results)
     if is_topic_is_series(filtered_results):
-        filtered_results = update_video_type(filtered_results)
         print("This is a series. Do you want to download a specific or all episodes?")
         filtered_results = select_season(filtered_results)
-        if len(filtered_results) > 0:
-            download_all_videos(filtered_results, download_folder, topic, quality, download_subtitles, output_strategy)
-        else:
-            print("No seasons detected in the results.")
-            exit(1)
     else:
-        print("This is not a series. Downloading the single video...")
-        raise NotImplementedError("Single video download not implemented yet.")
+        print("The results are movies, not series. Which video should be downloaded?")
+        filtered_results = select_movie(filtered_results)
+
+    if len(filtered_results) > 0:
+        download_all_videos(filtered_results, download_folder, topic, quality, download_subtitles, output_strategy)
+    else:
+        print("Nothing to download. Exiting.")
+        exit(1)
 
 
 if __name__ == "__main__":
